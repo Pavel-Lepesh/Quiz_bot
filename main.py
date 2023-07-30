@@ -2,26 +2,27 @@ from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage
 import asyncio
 import logging
-import psycopg2.pool
+# import psycopg2.pool
 
 
-from config.config import load_config, load_db_password
-from handlers import other_handlers, staff_handlers 
+from config.config import load_config  # , load_db_password
+from handlers import other_handlers, superadmin_handlers, staff_handlers
 
 
-pool = psycopg2.pool.SimpleConnectionPool(
-    minconn=1,
-    maxconn=10,
-    database="Quiz_members",
-    user="postgres",
-    password=load_db_password().tg_bot.db_password,
-    host="127.0.0.1",
-    port="5432"
-)
+# pool = psycopg2.pool.SimpleConnectionPool(
+#     minconn=1,
+#     maxconn=10,
+#     database="Quiz_members",
+#     user="postgres",
+#     password=load_db_password().tg_bot.db_password,
+#     host="127.0.0.1",
+#     port="5432"
+# )
 
-conn = pool.getconn()
-pool.putconn(conn)
-staff_handlers.pool = pool
+# conn = pool.getconn()
+# pool.putconn(conn)
+# superadmin_handlers.pool = pool
+# staff_handlers.pool = pool
 
 
 async def main():
@@ -32,6 +33,7 @@ async def main():
     bot: Bot = Bot(token=load_config().tg_bot.token, parse_mode='HTML')
     dp: Dispatcher = Dispatcher(storage=storage)
 
+    dp.include_router(superadmin_handlers.router)
     dp.include_router(staff_handlers.router)
     dp.include_router(other_handlers.router)
 

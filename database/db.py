@@ -1,8 +1,13 @@
-from dataclasses import dataclass
+import psycopg2.pool
+from config.config import load_db_password
 
 
-@dataclass
-class Staff:
-    super_admin: bool
-    admin: bool
-    MC: bool
+pool = psycopg2.pool.SimpleConnectionPool(
+    minconn=1,
+    maxconn=10,
+    database="Quiz_members",
+    user="postgres",
+    password=load_db_password().tg_bot.db_password,
+    host="127.0.0.1",
+    port="5432"
+)

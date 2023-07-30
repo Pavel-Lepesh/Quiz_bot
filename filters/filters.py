@@ -1,7 +1,7 @@
 from aiogram.filters import BaseFilter
 from aiogram.types import Message
 
-from main import pool
+from database.db import pool
 
 
 class IsSuperAdmin(BaseFilter):
@@ -13,8 +13,9 @@ class IsSuperAdmin(BaseFilter):
         cursor.execute(f"SELECT super_admin FROM quiz_staff "
                        f"WHERE user_id = {message.from_user.id};")
         is_super_admin: tuple[bool] = cursor.fetchone()
+        cursor.close()
         pool.putconn(conn)
-        return is_super_admin[0]
+        return is_super_admin[0] if is_super_admin else False
 
 
 class IsAdmin(BaseFilter):
@@ -26,6 +27,7 @@ class IsAdmin(BaseFilter):
         cursor.execute(f"SELECT admin FROM quiz_staff "
                        f"WHERE user_id = {message.from_user.id};")
         is_admin: tuple[bool] = cursor.fetchone()
+        cursor.close()
         pool.putconn(conn)
         return is_admin[0]
 
@@ -39,5 +41,6 @@ class IsMC(BaseFilter):
         cursor.execute(f"SELECT mc FROM quiz_staff "
                        f"WHERE user_id = {message.from_user.id};")
         is_mc: tuple[bool] = cursor.fetchall()
+        cursor.close()
         pool.putconn(conn)
         return is_mc[0]
