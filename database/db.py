@@ -1,5 +1,6 @@
 import psycopg2.pool
 from config.config import load_db_password
+from dataclasses import dataclass
 
 
 pool = psycopg2.pool.SimpleConnectionPool(
@@ -29,3 +30,20 @@ class ExecuteQuery:
             self.cursor.execute('COMMIT')
         self.cursor.close()
         self.pool.putconn(self.conn)
+
+
+@dataclass
+class TourSchema:
+    tour_id: int
+    game_id: int
+    title: str
+    description: str
+    option_1: str
+    option_2: str
+    option_3: str
+    option_4: str
+    answer: str
+    wrong: int
+    correct: int
+
+
