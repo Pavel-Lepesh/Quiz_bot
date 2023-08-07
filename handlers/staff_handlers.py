@@ -1,5 +1,5 @@
 from aiogram import Bot, Router, F
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import Message, CallbackQuery, BotCommand
 from aiogram.filters import Command, StateFilter
 from aiogram.filters.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
@@ -16,6 +16,7 @@ router.message.filter(IsSuperAdmin(), IsAdmin(), IsMC())
 
 class FSMStaffStates(StatesGroup):
     edit_or_new_game = State()
+    define_tour = State()
     edit_step1 = State()
     edit_step2 = State()
     edit_step3 = State()
@@ -23,6 +24,7 @@ class FSMStaffStates(StatesGroup):
     edit_step5 = State()
     edit_step6 = State()
     edit_step7 = State()
+    edit_step8 = State()
     save_game = State()
     confirm_wrong = State()
     confirm_correct = State()
@@ -32,10 +34,27 @@ class FSMStaffStates(StatesGroup):
     confirm_delete = State()
 
 
+# команды общего назначения
+
+
 @router.message(Command(commands=['info']))
 async def info_handler(message: Message):
     """Информационное сообщение с возможностями бота(для сотрудников)"""
     await message.answer(text=COMMANDS_FOR_STAFF['info'])
+
+
+@router.message(Command(commands=['getmenu']))
+async def getmenu_handler(message: Message, bot: Bot):
+    main_menu_commands = [BotCommand(command='/info', description='Получить информацию')]
+    await bot.set_my_commands(main_menu_commands)
+    await message.answer(text='menu')
+
+
+@router.message(Command(commands=['exit_edit']))
+async def exit_edit_handler(message: Message, state: FSMContext):
+    await message.answer(text='Вы вышли из режима редактирования')
+    await state.clear()
+    await state.set_state(default_state)
 
 
 # Здесь редактируем или выбираем игру
@@ -90,16 +109,49 @@ async def choose_edit_game_handler(callback: CallbackQuery, state: FSMContext):
         games = {str(id): title for id, title in cursor.fetchall()}
     await callback.message.edit_text(text='Выберите игру для редактирования',
                                      reply_markup=create_inline_kb(width=1, **games))
-    await state.set_state(FSMStaffStates.edit_step1)
+    await state.set_state(FSMStaffStates.define_tour)
+
+
+@router.callback_query(StateFilter(FSMStaffStates.define_tour))
+async def define_tour_handler(callback: CallbackQuery, state: FSMContext):
+    """Определяем номер тура и сохраняем game_id"""
+    game_id = callback.data
+    await state.update_data(game_id=game_id)
+    with ExecuteQuery(pool) as cursor:
+        cursor.execute(f"SELECT quantity FROM game "
+                       f"WHERE game_id = {game_id};")
+        quantity = cursor.fetchone()[0]
+        cursor.execute(f"SELECT tour_number FROM tour "
+                       f"WHERE game_id = {game_id};")
+        tours_numbers: list[int] = [i[0] for i in cursor.fetchall()]  # номера туров которые уже существуют
+    if quantity != len(tours_numbers):  # если количество туров не совпадает с загруженными турами
+        await callback.message.edit_text(text='Выберите номер тура',
+                                         reply_markup=create_inline_kb(width=1,
+                                                                       **{str(i): str(i) for i in range(1, quantity + 1) if i not in tours_numbers}))
+        await state.set_state(FSMStaffStates.edit_step1)
+    else:
+        await callback.message.edit_text(text='Задания для всех туров установлены!')
+        await state.set_state(default_state)
 
 
 @router.callback_query(StateFilter(FSMStaffStates.edit_step1))
 async def edit_game_step1_handler(callback: CallbackQuery, state: FSMContext, bot: Bot):
-    """Сохраняем game_id и просим ввести название тура"""
-    await state.update_data(game_id=callback.data)
-    await bot.send_message(chat_id=callback.message.chat.id, text='Напишите название тура')
-    await callback.message.delete()
-    await state.set_state(FSMStaffStates.edit_step2)
+    """Сохраняем tour_number и просим ввести название тура"""
+    tour_number = callback.data
+    data_dict = await state.get_data()
+    with ExecuteQuery(pool) as cursor:
+        cursor.execute(f"SELECT tour_number FROM tour "
+                       f"WHERE game_id = {data_dict['game_id']} AND tour_number = {tour_number};")
+        results = cursor.fetchall()
+
+    if not results:
+        await state.update_data(tour_number=tour_number)
+        await bot.send_message(chat_id=callback.message.chat.id, text='Напишите название тура')
+        await callback.message.delete()
+        await state.set_state(FSMStaffStates.edit_step2)
+    else:
+        await callback.message.edit_text(text='Этот тур уже существует. Выберите другой:',
+                                         reply_markup=callback.message.reply_markup)
 
 
 @router.message(StateFilter(FSMStaffStates.edit_step2), F.text)
@@ -158,10 +210,10 @@ async def edit_game_step7_handler(message: Message, state: FSMContext):
                                                                                                  option_4=data_dict[
                                                                                                      'option_4']))
 
-    await state.set_state(FSMStaffStates.edit_step5)
+    await state.set_state(FSMStaffStates.edit_step8)
 
 
-@router.callback_query(StateFilter(FSMStaffStates.edit_step5))
+@router.callback_query(StateFilter(FSMStaffStates.edit_step8))
 async def confirm_answer_handler(callback: CallbackQuery, state: FSMContext):
     """Сохраняем правильный ответ и выбираем количество баллов за неправильный"""
     await state.update_data(answer=callback.data)
@@ -181,6 +233,7 @@ async def confirm_wrong_handler(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(StateFilter(FSMStaffStates.confirm_correct))
 async def confirm_correct_handler(callback: CallbackQuery, state: FSMContext):
+    """Спрашиваем подтверждение на сохранение игры"""
     await state.update_data(correct=callback.data)
     await callback.message.edit_text(text='Сохраняем игру?', reply_markup=create_inline_kb(width=2, yes='Да', no='Нет'))
     await state.set_state(FSMStaffStates.save_game)
@@ -188,11 +241,12 @@ async def confirm_correct_handler(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(StateFilter(FSMStaffStates.save_game))
 async def save_game_handler(callback: CallbackQuery, state: FSMContext):
+    """Сохраняем игру в базу или ничего не делаем"""
     if callback.data == 'yes':
         data_dict = await state.get_data()
         correct_data = ', '.join([repr(value) for value in data_dict.values()])
         with ExecuteQuery(pool, commit=True) as cursor:
-            cursor.execute(f'INSERT INTO tour(game_id, title, description, option_1, option_2, option_3, option_4, answer, wrong, correct) '
+            cursor.execute(f'INSERT INTO tour(game_id, tour_number, title, description, option_1, option_2, option_3, option_4, answer, wrong, correct) '
                            f'VALUES ({correct_data});')
         await callback.message.edit_text(text='Игра сохранена!')
     else:

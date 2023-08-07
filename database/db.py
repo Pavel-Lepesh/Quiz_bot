@@ -36,6 +36,7 @@ class ExecuteQuery:
 class TourSchema:
     tour_id: int
     game_id: int
+    tour_number: int
     title: str
     description: str
     option_1: str
