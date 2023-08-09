@@ -46,5 +46,20 @@ class TourSchema:
     answer: str
     wrong: int
     correct: int
-
-
+#
+# CREATE TABLE step_tour
+# (
+#     step_tour_id SERIAL PRIMARY KEY,
+#     game_id INTEGER,
+# 	tour_number INTEGER,
+# 	title CHARACTER VARYING(50),
+# 	description TEXT,
+# 	option_1 CHARACTER VARYING(30),
+# 	option_2 CHARACTER VARYING(30),
+# 	option_3 CHARACTER VARYING(30),
+# 	option_4 CHARACTER VARYING(30),
+# 	answer CHARACTER VARYING(30),
+# 	wrong INTEGER,
+# 	correct INTEGER,
+# 	FOREIGN KEY (game_id) REFERENCES game (game_id) ON DELETE CASCADE
+# );
