@@ -40,7 +40,9 @@ class FSMStaffStates(StatesGroup):
     select_name = State()
     select_tours = State()
     delete_game = State()
-    confirm_delete = State()
+    delete_game2 = State()
+    confirm_delete_game = State()
+    delete_tour = State()
 
 
 # команды общего назначения
@@ -390,32 +392,49 @@ async def save_game_handler(callback: CallbackQuery, state: FSMContext):
     await state.set_state(default_state)
 
 
-# Здесь удаляем игру
+# Здесь удаляем части игры
 
 
-@router.message(IsSuperAdmin(), Command(commands=['delete_game']), StateFilter(default_state))
-async def delete_game_handler(message: Message, state: FSMContext):
-    """Приступаем к удалению игры"""
+@router.message(IsSuperAdmin(), Command(commands=['delete']), StateFilter(default_state))
+async def delete_handler(message: Message, state: FSMContext):
+    """Приступаем к удалению"""
     with ExecuteQuery(pool) as cursor:
         cursor.execute("SELECT game_id, title "
                        "FROM game;")
         games = {str(id): title for id, title in cursor.fetchall()}
-    await message.answer(text='Какую игру удалить?', reply_markup=create_inline_kb(width=1, **games))
-    await state.set_state(FSMStaffStates.delete_game)
+    if games:
+        await message.answer(text='Выберите игру', reply_markup=create_inline_kb(width=1, **games))
+        await state.set_state(FSMStaffStates.delete_game)
+    else:
+        await message.answer(text='Игры не найдены.')
+        await state.set_state(default_state)
 
 
 @router.callback_query(StateFilter(FSMStaffStates.delete_game))
-async def confirm_delete_handler(callback: CallbackQuery, state: FSMContext):
+async def delete_handler2(callback: CallbackQuery, state: FSMContext):
+    """Выбираем тур, либо удаляем игру"""
+    game_id = callback.data
+    await state.update_data(game_id=game_id)
+    with ExecuteQuery(pool) as cursor:
+        cursor.execute(f"SELECT tour_id, title FROM tour "
+                       f"WHERE game_id = {game_id};")
+        tours = {str(id): title for id, title in cursor.fetchall()}
+    await callback.message.edit_text(text='Выберите тур для удаления, либо удалите игру',
+                                     reply_markup=create_inline_kb(width=1, **tours, game_delete='Удалить эту игру'))
+    await state.set_state(FSMStaffStates.delete_game2)
+
+
+@router.callback_query(StateFilter(FSMStaffStates.delete_game2), F.data == 'game_delete')
+async def confirm_delete_game_handler(callback: CallbackQuery, state: FSMContext):
     """Подтверждаем удаление игры"""
-    await state.update_data(game_id=callback.data)
     await callback.message.edit_text(text='Вы уверены?', reply_markup=create_inline_kb(width=1,
                                                                                        yes='Да',
                                                                                        no='Нет'))
-    await state.set_state(FSMStaffStates.confirm_delete)
+    await state.set_state(FSMStaffStates.confirm_delete_game)
 
 
-@router.callback_query(StateFilter(FSMStaffStates.confirm_delete))
-async def approve_delete_handler(callback: CallbackQuery, state: FSMContext, bot: Bot):
+@router.callback_query(StateFilter(FSMStaffStates.confirm_delete_game))
+async def approve_delete_game_handler(callback: CallbackQuery, state: FSMContext):
     """Удаляем игру из базы данных"""
     if callback.data == 'yes':
         data_dict = await state.get_data()
@@ -428,4 +447,45 @@ async def approve_delete_handler(callback: CallbackQuery, state: FSMContext, bot
         await callback.message.delete()
 
     await state.clear()
+    await state.set_state(default_state)
+
+
+@router.callback_query(StateFilter(FSMStaffStates.delete_game2))
+async def delete_tour_handler(callback: CallbackQuery, state: FSMContext):
+    """Выбираем тур или удаляем степ"""
+    await state.clear()  # очищаем хранилище, чтобы game_id не вызывал конфликтов
+    tour_id = callback.data
+    await state.update_data(tour_id=tour_id)
+    with ExecuteQuery(pool) as cursor:
+        cursor.execute(f"SELECT step_tour_id, title FROM step_tour "
+                       f"WHERE tour_id = {tour_id};")
+        steps = {str(id): title for id, title in cursor.fetchall()}
+
+    await callback.message.edit_text(text='Выберите степ для удаления, либо удалите тур',
+                                     reply_markup=create_inline_kb(width=1, **steps, tour_delete='Удалить этот тур'))
+    await state.set_state(FSMStaffStates.delete_tour)
+
+
+@router.callback_query(StateFilter(FSMStaffStates.delete_tour), F.data == 'tour_delete')
+async def confirm_delete_tour(callback: CallbackQuery, state: FSMContext):
+    """Подтверждаем удаление тура"""
+    data_dict = await state.get_data()
+    tour_id = data_dict['tour_id']
+    with ExecuteQuery(pool, commit=True) as cursor:
+        cursor.execute(f"DELETE FROM tour "
+                       f"WHERE tour_id = {tour_id};")
+    await callback.message.edit_text(text='Удаление завершено!')
+    await state.clear()
+    await state.set_state(default_state)
+
+
+@router.callback_query(StateFilter(FSMStaffStates.delete_tour))
+async def step_tour_delete_handler(callback: CallbackQuery, state: FSMContext):
+    """Удаляем степ тура"""
+    step_tour_id = callback.data
+    with ExecuteQuery(pool, commit=True) as cursor:
+        cursor.execute(f"DELETE FROM step_tour "
+                       f"WHERE step_tour_id = {step_tour_id};")
+    await state.clear()
+    await callback.message.edit_text(text='Удаление завершено!')
     await state.set_state(default_state)
