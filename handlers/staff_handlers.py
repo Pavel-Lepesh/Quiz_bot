@@ -43,6 +43,9 @@ class FSMStaffStates(StatesGroup):
     delete_game2 = State()
     confirm_delete_game = State()
     delete_tour = State()
+    choose_team = State()
+    add_another_one_team = State()
+    delete_team = State()
 
 
 # команды общего назначения
@@ -488,4 +491,66 @@ async def step_tour_delete_handler(callback: CallbackQuery, state: FSMContext):
                        f"WHERE step_tour_id = {step_tour_id};")
     await state.clear()
     await callback.message.edit_text(text='Удаление завершено!')
+    await state.set_state(default_state)
+
+
+# Здесь добавляем команды
+
+
+@router.message(Command(commands=['add_team']))
+async def add_team_handler(message: Message, state: FSMContext):
+    """Приступаем к добавлению команды"""
+    await message.answer(text='Введите название новой команды')
+    await state.set_state(FSMStaffStates.choose_team)
+
+
+@router.message(StateFilter(FSMStaffStates.choose_team))
+async def define_team_handler(message: Message, state: FSMContext, bot: Bot):
+    """Добавляем команду в базу данных"""
+    with ExecuteQuery(pool, commit=True) as cursor:
+        cursor.execute(f"INSERT INTO team(name) "
+                       f"VALUES ('{message.text}');")
+    await bot.send_message(chat_id=message.chat.id, text=f'Команда "{message.text}" добавлена!')
+    await message.answer(text='Хотите добавить еще одну команду?',
+                         reply_markup=create_inline_kb(width=2, yes='Да', no='Нет'))
+    await state.set_state(FSMStaffStates.add_another_one_team)
+
+
+@router.callback_query(StateFilter(FSMStaffStates.add_another_one_team))
+async def add_another_one_team_handler(callback: CallbackQuery, state: FSMContext, bot: Bot):
+    """Добавляем еще одну команду, либо отказываемся"""
+    if callback.data == 'yes':
+        await callback.message.delete()
+        await bot.send_message(chat_id=callback.message.chat.id, text='Введите название новой команды')
+        await state.set_state(FSMStaffStates.choose_team)
+    else:
+        await callback.message.delete()
+        await state.set_state(default_state)
+
+
+# Здесь удаляем команду
+
+
+@router.message(Command(commands=['delete_team']))
+async def delete_team_handler(message: Message, state: FSMContext):
+    """Приступаем к удалению команды"""
+    with ExecuteQuery(pool) as cursor:
+        cursor.execute("SELECT team_id, name FROM team;")
+        teams = {str(id): name for id, name in cursor.fetchall()}
+    if teams:
+        await message.answer(text='Выберите команду, которую хотите удалить',
+                             reply_markup=create_inline_kb(width=1, **teams))
+        await state.set_state(FSMStaffStates.delete_team)
+    else:
+        await message.answer(text='Команды не найдены')
+
+
+@router.callback_query(StateFilter(FSMStaffStates.delete_team))
+async def confirm_delete_team_handler(callback: CallbackQuery, state: FSMContext):
+    """Удаляем команду"""
+    team_id = callback.data
+    with ExecuteQuery(pool, commit=True) as cursor:
+        cursor.execute(f"DELETE FROM team "
+                       f"WHERE team_id = {team_id};")
+    await callback.message.edit_text(text='Удаление завершено')
     await state.set_state(default_state)
