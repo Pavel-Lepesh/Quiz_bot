@@ -1,7 +1,17 @@
+from aiogram import Bot
 from aiogram.filters import BaseFilter
 from aiogram.types import Message
 
 from database.db import pool
+
+
+class IsStaff(BaseFilter):
+    """Проверка на участников персонала"""
+    async def __call__(self, message: Message, bot: Bot):
+        chat_members = [member.user.id for member in await bot.get_chat_administrators(chat_id=-1001704401643) if
+                        not member.user.is_bot]
+
+        return message.from_user.id in chat_members
 
 
 class IsSuperAdmin(BaseFilter):
@@ -29,7 +39,7 @@ class IsAdmin(BaseFilter):
         is_admin: tuple[bool] = cursor.fetchone()
         cursor.close()
         pool.putconn(conn)
-        return is_admin[0]
+        return is_admin[0] if is_admin else False
 
 
 class IsMC(BaseFilter):
@@ -40,7 +50,8 @@ class IsMC(BaseFilter):
         cursor = conn.cursor()
         cursor.execute(f"SELECT mc FROM quiz_staff "
                        f"WHERE user_id = {message.from_user.id};")
-        is_mc: tuple[bool] = cursor.fetchall()
+        is_mc: tuple[bool] = cursor.fetchone()
         cursor.close()
         pool.putconn(conn)
-        return is_mc[0]
+        print(is_mc)
+        return is_mc[0] if is_mc else False

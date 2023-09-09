@@ -22,5 +22,13 @@ COMMANDS_FOR_STAFF = {
 }
 
 COMMANDS_FOR_PLAYERS = {
-    'start': ''
+    'start': 'Привет! Давай выберем твою команду',
+    'wrong_answer': 'Введите команду /start чтобы снова приступить к выбору команды\n\n'
+                    'Если у вас возникли проблемы введите команду /help',
+    'complete_registration': 'Отлично! Вы зарегистрированы. Ожидайте начала игры.'
+}
+
+
+COMMANDS_FOR_MC = {
+    'start_game': ''
 }

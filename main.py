@@ -6,7 +6,7 @@ import logging
 
 from config.config import load_config
 from aiogram.fsm.strategy import FSMStrategy
-from handlers import other_handlers, superadmin_handlers, staff_handlers
+from handlers import other_handlers, superadmin_handlers, staff_handlers, players_handlers, mc_handlers
 
 
 async def main():
@@ -19,6 +19,8 @@ async def main():
 
     dp.include_router(superadmin_handlers.router)
     dp.include_router(staff_handlers.router)
+    dp.include_router(mc_handlers.router)
+    dp.include_router(players_handlers.router)
     dp.include_router(other_handlers.router)
 
     await bot.delete_webhook(drop_pending_updates=True)

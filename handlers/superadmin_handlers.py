@@ -90,7 +90,7 @@ async def assign_roles_confirm(callback: CallbackQuery, state: FSMContext):
         # в callback.data хранится id пользователя
         if role == 'admin':
             cursor.execute(f"INSERT INTO quiz_staff(user_id, super_admin, admin, mc, fullname) "
-                           f"VALUES ({callback.data}, FALSE, TRUE, TRUE, '{member_name}');")
+                           f"VALUES ({callback.data}, FALSE, TRUE, FALSE, '{member_name}');")
         else:
             cursor.execute(f"INSERT INTO quiz_staff(user_id, super_admin, admin, mc, fullname) "
                            f"VALUES ({callback.data}, FALSE, FALSE, TRUE, '{member_name}');")

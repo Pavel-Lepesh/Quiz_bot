@@ -7,14 +7,14 @@ from aiogram.fsm.state import default_state
 
 from database.db import pool, ExecuteQuery
 from lexicon.lexicon import COMMANDS_FOR_STAFF
-from filters.filters import IsSuperAdmin, IsAdmin, IsMC
+from filters.filters import IsSuperAdmin, IsStaff
 from keyboards.staff_kbs import create_inline_kb
 
 import csv
 
 
 router: Router = Router()
-router.message.filter(IsSuperAdmin(), IsAdmin(), IsMC())
+router.message.filter(IsStaff())
 
 
 class FSMStaffStates(StatesGroup):
@@ -524,6 +524,7 @@ async def add_another_one_team_handler(callback: CallbackQuery, state: FSMContex
         await bot.send_message(chat_id=callback.message.chat.id, text='Введите название новой команды')
         await state.set_state(FSMStaffStates.choose_team)
     else:
+        await callback.answer()
         await callback.message.delete()
         await state.set_state(default_state)
 
