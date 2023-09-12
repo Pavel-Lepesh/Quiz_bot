@@ -53,5 +53,4 @@ class IsMC(BaseFilter):
         is_mc: tuple[bool] = cursor.fetchone()
         cursor.close()
         pool.putconn(conn)
-        print(is_mc)
         return is_mc[0] if is_mc else False

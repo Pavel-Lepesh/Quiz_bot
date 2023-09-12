@@ -29,6 +29,7 @@ async def command_help_handler(message: Message, bot: Bot):
         cursor.execute("SELECT user_id FROM quiz_staff "
                        "WHERE mc = true;")
         mc_id = cursor.fetchone()[0]
+    await message.answer(text='Ваша просьба о помощи отправлена ведущему.')
     await bot.send_message(chat_id=mc_id, text=f'Игрок с именем {message.from_user.full_name} просит помощи.')
 
 
