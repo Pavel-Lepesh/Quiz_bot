@@ -8,6 +8,7 @@ from aiogram.fsm.state import default_state
 from database.db import pool, ExecuteQuery
 from keyboards.staff_kbs import create_inline_kb
 from filters.filters import IsMC
+from lexicon.lexicon import COMMANDS_FOR_MC
 
 
 router: Router = Router()
@@ -22,27 +23,24 @@ class FSMMcStates(StatesGroup):
     send_question = State()
 
 
-@router.message(Command(commands=['send_message']))
-async def prepare_message_handler(message: Message, state: FSMContext):
-    """Вводим сообщение для рассылки"""
-    await message.answer(text='Введите сообщение для рассылки')
-    await state.set_state(FSMMcStates.send_any_message)
+# Команды общего назначения
 
-# предусмотреть вариант с отменой состояния отправки сообщения
-@router.message(StateFilter(FSMMcStates.send_any_message))
-async def send_message_handler(message: Message, state: FSMContext, bot: Bot):
-    """Отправляем сообщение всем участникам игры"""
-    with ExecuteQuery(pool) as cursor:
-        cursor.execute("SELECT user_id FROM player;")
-        all_id: list[tuple[int]] = cursor.fetchall()
-    for item in all_id:
-        await bot.send_message(chat_id=item[0], text=f'{message.text}')
-    await message.answer(text='Сообщение отправлено')
+
+@router.message(Command(commands=['mc_info']))
+async def mc_info_handler(message: Message):
+    """Отправляем mc список доступных команд"""
+    await message.answer(text=COMMANDS_FOR_MC['info'])
+
+
+@router.message(Command(commands=['exit_game']))
+async def exit_game_handler(message: Message, state: FSMContext):
+    """Удаляем game_id и остальные данные из хранилища, тем самым выходя из игры"""
+    await state.clear()
     await state.set_state(default_state)
-    await bot.send_message(text='ff')
+    await message.answer(text='Вы вышли из игры\n\nДля начала новой игры введите /start_game')
 
 
-# Вход в состояние игры для ведущего
+# Режим игры для ведущего
 
 
 @router.message(Command(commands=['start_game']))
@@ -123,31 +121,35 @@ async def send_question_handler(callback: CallbackQuery, state: FSMContext, bot:
     """Отправляем сообщение, либо отказываемся от отправки"""
     if callback.data == 'yes':
         data_dict = await state.get_data()  # все данные степа
-        message_text = f'{data_dict["title"]}\n\n{data_dict["description"]}'
-        message_buttons = {'option_1': data_dict['option_1'],
-                           'option_2': data_dict['option_2'],
-                           'option_3': data_dict['option_3'],
-                           'option_4': data_dict['option_4']}
+        message_text = f'<b>{data_dict["title"]}</b>\n\n{data_dict["description"]}'
+        message_buttons = {f'option_1_{data_dict["step_tour_id"]}': data_dict['option_1'],
+                           f'option_2_{data_dict["step_tour_id"]}': data_dict['option_2'],
+                           f'option_3_{data_dict["step_tour_id"]}': data_dict['option_3'],
+                           f'option_4_{data_dict["step_tour_id"]}': data_dict['option_4']}  # вторым числом пишем step_tour_id
+        additionally_text = (f'\n<b>Варианты ответов:</b>\n'
+                             f'1. {data_dict["option_1"]}\n'
+                             f'2. {data_dict["option_2"]}\n'
+                             f'3. {data_dict["option_3"]}\n'
+                             f'4. {data_dict["option_4"]}\n')
 
         with ExecuteQuery(pool) as cursor:
             cursor.execute(
-                'SELECT user_id FROM player;'
+                'SELECT user_id, captain FROM player;'
             )
-            users: list[tuple[int], ...] = cursor.fetchall()
+            users: list[tuple[int, bool], ...] = cursor.fetchall()
 
         await state.set_state(default_state)  # ОЧЕНЬ ВАЖНЫЙ МОМЕНТ (использовать default_state во время тестирования \
                                               # в другом случае использовать состояние игроков в обчном режиме
 
         for user in users:
             await bot.send_message(chat_id=user[0],
-                                   text=message_text,
-                                   reply_markup=create_inline_kb(width=2, **message_buttons),
-                                   )
+                                   text=message_text if user[1] else message_text + additionally_text,
+                                   reply_markup=create_inline_kb(width=2, **message_buttons) if user[1] else None,
+                                   )  # капитану команды присылается сообщение с кнопками, игрокам без
 
         await callback.message.delete()
 
     else:
         await callback.message.delete()
         await state.set_state(default_state)
-
 
