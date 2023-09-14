@@ -112,7 +112,7 @@ async def update_base_handler(callback: CallbackQuery, state: FSMContext):
 
 
 # important handler (протестировать работу состояний здесь)
-@router.callback_query()
+@router.callback_query(StateFilter(default_state))  # СОСТОЯНИЕ (решить какое использовать)
 async def fix_answer_handler(callback: CallbackQuery, state: FSMContext):
     """Принимаем сообщение от mc, заносим ответ в бд"""
     user_id = callback.from_user.id

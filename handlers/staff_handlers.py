@@ -37,7 +37,9 @@ class FSMStaffStates(StatesGroup):
     save_game = State()
     confirm_wrong = State()
     confirm_correct = State()
-    select_name = State()
+    select_way_to_create_game = State()
+    select_name_game_csv = State()
+    select_name_game_hand = State()
     select_tours = State()
     delete_game = State()
     delete_game2 = State()
@@ -46,6 +48,9 @@ class FSMStaffStates(StatesGroup):
     choose_team = State()
     add_another_one_team = State()
     delete_team = State()
+    choose_team_for_edit = State()
+    choose_player_for_edit = State()
+    action_for_player = State()
 
 
 # команды общего назначения
@@ -86,12 +91,114 @@ async def select_or_add_the_game_handler(message: Message, state: FSMContext):
 
 @router.callback_query(StateFilter(FSMStaffStates.edit_or_new_game), F.data == 'new_game')
 async def new_game_callback(callback: CallbackQuery, state: FSMContext):
-    """Пишем в сообщении имя для новой игры"""
-    await callback.message.edit_text(text='Напишите название вашей игры')
-    await state.set_state(FSMStaffStates.select_name)
+    """Выбираем способ создания игры"""
+    await callback.message.edit_text(text='Выберите способ создания игры',
+                                     reply_markup=create_inline_kb(width=1,
+                                                                   import_csv='Импорт из .csv файла',
+                                                                   hand_edit='Ручное редактирование игры'))
+
+    await state.set_state(FSMStaffStates.select_way_to_create_game)
 
 
-@router.message(StateFilter(FSMStaffStates.select_name), F.text)
+@router.callback_query(StateFilter(FSMStaffStates.select_way_to_create_game), F.data == 'import_csv')
+async def import_csv_handler(callback: CallbackQuery, state: FSMContext):
+    """Просим загрузить файл для импорта туров и степов"""
+    await callback.message.edit_text(text='Введите название игры')
+    await state.set_state(FSMStaffStates.select_name_game_csv)
+
+
+@router.message(StateFilter(FSMStaffStates.select_name_game_csv), F.text)
+async def choose_name_game_csv_handler(message: Message, state: FSMContext):
+    """Загружаем имя игры"""
+    game_title = message.text
+
+    # вносим игру в базу данных
+    with ExecuteQuery(pool, commit=True) as cursor:
+        cursor.execute(
+            f"INSERT INTO game(title, quantity) "
+            f"VALUES ('{game_title}', 0);"
+        )
+
+    # достаем из бд game_id
+    with ExecuteQuery(pool) as cursor:
+        cursor.execute(
+            f"SELECT game_id FROM game "
+            f"WHERE title = '{game_title}';"
+        )
+        game_id = cursor.fetchone()[0]
+
+    await state.update_data(game_title=game_title, game_id=game_id)
+
+    await message.answer(text='Отлично! Теперь загрузите файл .csv')
+    await state.set_state(FSMStaffStates.download_csv)
+
+
+# important handler
+@router.message(StateFilter(FSMStaffStates.download_csv), F.document.mime_type == 'text/csv')
+async def download_csv_handler(message: Message, state: FSMContext, bot: Bot):
+    """Загрузка файла и обработка"""
+    try:
+        # загружаем файл и сохраняем его как data.csv
+        file = await bot.get_file(message.document.file_id)
+        file_path = file.file_path
+        await bot.download_file(file_path, './data.csv')
+    except Exception as error:
+        await message.answer(text=f'Возникла проблема с загрузкой файла: {error}')
+        await state.clear()
+        await state.set_state(default_state)
+
+    try:
+        # сохраняем туры и степы в БД
+        with open('./data.csv', newline='') as file:
+            state_data = await state.get_data()
+            game_id = state_data['game_id']
+            count_tours = 0  # счетчик туров
+            tour_number = None  # сюда сохраняем значение для поиска соответствующего tour_id
+            rows = csv.DictReader(file, delimiter=';')
+
+            for row in rows:
+                if row['tour_number']:  # если в строке есть tour_number, значит это строку вносим как тур
+                    count_tours += 1
+                    tour_number = row['tour_number']
+                    tour = ', '.join(map(repr, list(row.values())[:3]))
+                    with ExecuteQuery(pool, commit=True) as cursor:
+                        cursor.execute(f"INSERT INTO tour(game_id, tour_number, title, quantity) "
+                                       f"VALUES ({game_id}, {tour});")
+                else:  # для степов тура
+                    step_tour = ', '.join(map(repr, list(row.values())[3:]))
+                    with ExecuteQuery(pool) as cursor:
+                        cursor.execute(f"SELECT tour_id FROM tour "
+                                       f"WHERE game_id = {game_id} AND tour_number = {tour_number};")
+                        tour_id = cursor.fetchone()[0]
+                    with ExecuteQuery(pool, commit=True) as cursor:
+                        cursor.execute(
+                            f"INSERT INTO step_tour(tour_id, step_tour_number, title, description, option_1, option_2, option_3, option_4, answer, wrong, correct) "
+                            f"VALUES ({tour_id}, {step_tour});")
+
+        with ExecuteQuery(pool, commit=True) as cursor:
+            cursor.execute(  # укажем в таблице game quantity для игры
+                f'UPDATE game '
+                f'SET quantity = {count_tours} '
+                f'WHERE game_id = {game_id};'
+            )
+
+    except Exception as error:
+        await message.answer(text=f'Возникла ошибка с обработкой файла: {error}')
+    else:
+        await message.answer(text='Данные успешно загружены!')
+    finally:
+        await state.clear()
+        await state.set_state(default_state)
+
+
+@router.callback_query(StateFilter(FSMStaffStates.select_way_to_create_game), F.data == 'hand_edit')
+async def choose_name_for_game_handler(callback: CallbackQuery, state: FSMContext):
+    """Выбираем имя для игры """
+    await callback.message.edit_text(text='Введите название игры')
+    await state.set_state(FSMStaffStates.select_name_game_hand)
+
+
+@router.message(StateFilter(FSMStaffStates.select_name_game_hand), F.text)
 async def select_name_handler(message: Message, state: FSMContext):
     """Вводим количество туров"""
     await state.update_data(game_title=message.text)
@@ -143,62 +250,10 @@ async def define_tour_handler(callback: CallbackQuery, state: FSMContext):
         await callback.message.edit_text(text='Выберите номер тура',
                                          reply_markup=create_inline_kb(width=1,
                                                                        **{str(i): str(i) for i in range(1, quantity + 1) if i not in tours_numbers},
-                                                                       import_csv='Загрузить из файла CSV'))
+                                                                       ))
         await state.set_state(FSMStaffStates.edit_tour_step1)
     else:
         await callback.message.edit_text(text='Задания для всех туров установлены!')
-        await state.clear()
-        await state.set_state(default_state)
-
-
-@router.callback_query(StateFilter(FSMStaffStates.edit_tour_step1), F.data == 'import_csv')
-async def import_csv_handler(callback: CallbackQuery, state: FSMContext):
-    """Просим загрузить файл для импорта туров и степов"""
-    await callback.message.edit_text(text='Загрузите файл с турами для игры')
-    await state.set_state(FSMStaffStates.download_csv)
-
-
-@router.message(StateFilter(FSMStaffStates.download_csv), F.document.mime_type == 'text/csv')
-async def download_csv_handler(message: Message, state: FSMContext, bot: Bot):
-    """Загрузка файла и обработка"""
-    try:
-        # загружаем файл и сохраняем его как data.csv
-        file = await bot.get_file(message.document.file_id)
-        file_path = file.file_path
-        await bot.download_file(file_path, './data.csv')
-    except Exception as error:
-        await message.answer(text=f'Возникла проблема с загрузкой файла: {error}')
-
-    try:
-        # сохраняем туры и степы в БД
-        with open('./data.csv', newline='') as file:
-            state_data = await state.get_data()
-            game_id = state_data['game_id']
-            tour_number = None  # сюда сохраняем значение для поиска соответствующего tour_id
-            rows = csv.DictReader(file, delimiter=';')
-
-            for row in rows:
-                if row['tour_number']:  # если в строке есть tour_number, значит это строку вносим как тур
-                    tour_number = row['tour_number']
-                    tour = ', '.join(map(repr, list(row.values())[:3]))
-                    with ExecuteQuery(pool, commit=True) as cursor:
-                        cursor.execute(f"INSERT INTO tour(game_id, tour_number, title, quantity) "
-                                       f"VALUES ({game_id}, {tour});")
-                else:  # для степов тура
-                    step_tour = ', '.join(map(repr, list(row.values())[3:]))
-                    with ExecuteQuery(pool) as cursor:
-                        cursor.execute(f"SELECT tour_id FROM tour "
-                                       f"WHERE game_id = {game_id} AND tour_number = {tour_number};")
-                        tour_id = cursor.fetchone()[0]
-                    with ExecuteQuery(pool, commit=True) as cursor:
-                        cursor.execute(
-                            f"INSERT INTO step_tour(tour_id, step_tour_number, title, description, option_1, option_2, option_3, option_4, answer, wrong, correct) "
-                            f"VALUES ({tour_id}, {step_tour});")
-    except Exception as error:
-        await message.answer(text=f'Возникла ошибка с обработкой файла: {error}')
-    else:
-        await message.answer(text='Данные успешно загружены!')
-    finally:
         await state.clear()
         await state.set_state(default_state)
 
@@ -554,4 +609,114 @@ async def confirm_delete_team_handler(callback: CallbackQuery, state: FSMContext
         cursor.execute(f"DELETE FROM team "
                        f"WHERE team_id = {team_id};")
     await callback.message.edit_text(text='Удаление завершено')
+    await state.set_state(default_state)
+
+
+# Редактируем состав и роли игроков
+
+
+@router.message(Command(commands=['edit_players']))
+async def edit_players_handler(message: Message, state: FSMContext):
+    """Выбираем команду, чьих игроков будем редактировать"""
+    with ExecuteQuery(pool) as cursor:
+        cursor.execute('SELECT team_id, name FROM team;')
+        teams_data = {str(id): name for id, name in cursor.fetchall()}
+
+    if teams_data:
+        await message.answer(text='Выберите команду', reply_markup=create_inline_kb(width=1, **teams_data))
+        await state.set_state(FSMStaffStates.choose_team_for_edit)
+    else:
+        await message.answer(text='Нет зарегистрированных команд')
+
+
+@router.callback_query(StateFilter(FSMStaffStates.choose_team_for_edit))
+async def suggest_players_handler(callback: CallbackQuery, state: FSMContext):
+    """Предлагаем список игроков для редактирования"""
+    with ExecuteQuery(pool) as cursor:
+        cursor.execute(f'SELECT user_id, fullname FROM player '
+                       f'WHERE team_id = {callback.data};')
+        players = {str(id): fullname for id, fullname in cursor.fetchall()}
+
+    if players:
+        await callback.message.edit_text(text='Выберите игрока', reply_markup=create_inline_kb(width=1, **players))
+        await state.set_state(FSMStaffStates.choose_player_for_edit)
+    else:
+        await callback.message.edit_text(text='Нет зарегистрированных игроков')
+        await state.set_state(default_state)
+
+
+@router.callback_query(StateFilter(FSMStaffStates.choose_player_for_edit))
+async def suggest_actions_handler(callback: CallbackQuery, state: FSMContext):
+    """Предлагаем варианты взаимодействия"""
+    user_id = callback.data
+
+    # получаем данные об игроке и его команде
+    with ExecuteQuery(pool) as cursor:
+        cursor.execute(f'SELECT team_id, captain FROM player '
+                       f'WHERE user_id = {user_id};')
+        team_id, player_id_captain = cursor.fetchone()
+
+        cursor.execute(f'SELECT has_captain FROM team '
+                       f'WHERE team_id = {team_id};')
+        team_has_captain = cursor.fetchone()[0]
+    await state.update_data(user_id=user_id,
+                            team_id=team_id,
+                            player_is_captain=player_id_captain,
+                            team_has_captain=team_has_captain)
+
+    await callback.message.edit_text(text='Выберите действие',
+                                     reply_markup=create_inline_kb(width=1,
+                                                                   captain='Назначить капитаном',
+                                                                   delete='Удалить игрока'))
+    await state.set_state(FSMStaffStates.action_for_player)
+
+
+# important handler
+@router.callback_query(StateFilter(FSMStaffStates.action_for_player))
+async def action_for_players_handler(callback: CallbackQuery, state: FSMContext):
+    """Взаимодействуем с бд"""
+    data_dict = await state.get_data()
+
+    if callback.data == 'captain':
+        if data_dict['player_is_captain']:  # если этот игрок капитан, то оставляем все как есть
+            await callback.message.edit_text(text='Этот игрок уже является капитаном!')
+
+        else:
+            with ExecuteQuery(pool, commit=True) as cursor:
+                if data_dict['team_has_captain']:  # если в команде уже есть капитан, нужно его разжаловать
+                    cursor.execute(
+                        f'UPDATE player '
+                        f'SET captain = false '
+                        f'WHERE team_id = {data_dict["team_id"]} AND captain = true;'
+                    )
+
+                cursor.execute(  # указываем в отношении team наличие капитана
+                    f'UPDATE team '
+                    f'SET has_captain = true '
+                    f'WHERE team_id = {data_dict["team_id"]};'
+                )
+                cursor.execute(  # назначаем капитана в отношении team
+                    f'UPDATE player '
+                    f'SET captain = true '
+                    f'WHERE user_id = {data_dict["user_id"]};'
+                )
+
+            await callback.message.edit_text(text='Капитан назначен!')
+
+    else:  # если выбираем удалить игрока
+        with ExecuteQuery(pool, commit=True) as cursor:
+            cursor.execute(  # удаляем игрока из бд
+                f'DELETE FROM player '
+                f'WHERE user_id = {data_dict["user_id"]};'
+            )
+
+            if data_dict['player_is_captain']:  # если игрок капитан, то обновляем отношение team (has_captain = false)
+                cursor.execute(
+                    f'UPDATE team '
+                    f'SET has_captain = false '
+                    f'WHERE team_id = {data_dict["team_id"]};'
+                )
+        await callback.message.edit_text(text='Игрок удален!')
+
+    await state.clear()
     await state.set_state(default_state)
