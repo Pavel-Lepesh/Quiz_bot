@@ -10,7 +10,7 @@ from handlers import other_handlers, superadmin_handlers, staff_handlers, player
 
 
 async def main():
-    logging.basicConfig(level=logging.INFO)
+    logging.basicConfig(level=logging.DEBUG)
 
     storage: MemoryStorage = MemoryStorage()
 

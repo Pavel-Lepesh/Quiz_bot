@@ -62,8 +62,13 @@ async def assign_roles_callback(callback: CallbackQuery, state: FSMContext, bot:
         cursor.execute("SELECT user_id FROM quiz_staff;")
         id_members: list[int] = [i[0] for i in cursor.fetchall()]
 
+    with ExecuteQuery(pool) as cursor:
+        cursor.execute('SELECT chat_id FROM chat_data '
+                       'WHERE chat_data_id = 1;')
+        chat_id = cursor.fetchone()[0]
+
     # получаем всех участников чата персонала, кроме бота
-    chat_members = [member for member in await bot.get_chat_administrators(chat_id=-1001704401643) if
+    chat_members = [member for member in await bot.get_chat_administrators(chat_id=chat_id) if
                     not member.user.is_bot and member.user.id not in id_members]
 
     role = 'Admin' if callback.data == 'admin' else 'MC'  # для удобного редактирования

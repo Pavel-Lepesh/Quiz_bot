@@ -9,6 +9,7 @@ from database.db import pool, ExecuteQuery
 from lexicon.lexicon import COMMANDS_FOR_STAFF
 from filters.filters import IsSuperAdmin, IsStaff
 from keyboards.staff_kbs import create_inline_kb
+from validation.csv_validation import GameValidationError, tour_validation, step_tour_validation
 
 import csv
 
@@ -66,7 +67,6 @@ async def info_handler(message: Message):
 async def getmenu_handler(message: Message, bot: Bot):
     main_menu_commands = [BotCommand(command='/info', description='Получить информацию')]
     await bot.set_my_commands(main_menu_commands)
-    await message.answer(text='menu')
 
 
 @router.message(Command(commands=['exit_edit']))
@@ -152,12 +152,16 @@ async def download_csv_handler(message: Message, state: FSMContext, bot: Bot):
         with open('./data.csv', newline='') as file:
             state_data = await state.get_data()
             game_id = state_data['game_id']
+
             count_tours = 0  # счетчик туров
             tour_number = None  # сюда сохраняем значение для поиска соответствующего tour_id
             rows = csv.DictReader(file, delimiter=';')
 
             for row in rows:
                 if row['tour_number']:  # если в строке есть tour_number, значит это строку вносим как тур
+
+                    tour_validation(row)  # проходим валидацию тура
+
                     count_tours += 1
                     tour_number = row['tour_number']
                     tour = ', '.join(map(repr, list(row.values())[:3]))
@@ -166,6 +170,9 @@ async def download_csv_handler(message: Message, state: FSMContext, bot: Bot):
                                        f"VALUES ({game_id}, {tour});")
                 else:  # для степов тура
                     step_tour = ', '.join(map(repr, list(row.values())[3:]))
+
+                    step_tour_validation(row)  # проходим валидацию степа
+
                     with ExecuteQuery(pool) as cursor:
                         cursor.execute(f"SELECT tour_id FROM tour "
                                        f"WHERE game_id = {game_id} AND tour_number = {tour_number};")
@@ -179,6 +186,14 @@ async def download_csv_handler(message: Message, state: FSMContext, bot: Bot):
             cursor.execute(  # укажем в таблице game quantity для игры
                 f'UPDATE game '
                 f'SET quantity = {count_tours} '
+                f'WHERE game_id = {game_id};'
+            )
+    except GameValidationError as error:
+        await message.answer(text=f'Введены некорректные данные:\n{error}')
+
+        with ExecuteQuery(pool, commit=True) as cursor:  # если происходит ошибка валидации, удаляем ранее созданную игру
+            cursor.execute(
+                f'DELETE FROM game '
                 f'WHERE game_id = {game_id};'
             )
 

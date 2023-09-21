@@ -1,4 +1,6 @@
 import psycopg2.pool
+import asyncpg
+import asyncio
 from config.config import load_db_password
 from dataclasses import dataclass
 
@@ -12,6 +14,20 @@ pool = psycopg2.pool.SimpleConnectionPool(
     host="127.0.0.1",
     port="5432"
 )
+
+
+# async def create_db_pool():
+#     pool = await asyncpg.create_pool(
+#         database="Quiz_members",
+#         user="postgres",
+#         password=load_db_password().tg_bot.db_password,
+#         host="127.0.0.1",
+#         port="5432"
+#     )
+#     return pool
+#
+#
+# pool = asyncio.get_event_loop().run_until_complete(create_db_pool())
 
 
 class ExecuteQuery:

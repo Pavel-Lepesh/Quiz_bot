@@ -1,4 +1,4 @@
-from aiogram import Router, Bot
+from aiogram import Router, Bot, F
 from aiogram.types import Message, CallbackQuery
 from aiogram.filters import Command, StateFilter
 from aiogram.filters.state import State, StatesGroup
@@ -8,6 +8,7 @@ from aiogram.fsm.state import default_state
 from database.db import pool, ExecuteQuery
 from keyboards.staff_kbs import create_inline_kb
 from lexicon.lexicon import COMMANDS_FOR_PLAYERS
+from keyboards.set_menu import set_players_menu
 
 
 router: Router = Router()
@@ -33,12 +34,20 @@ async def command_help_handler(message: Message, bot: Bot):
     await bot.send_message(chat_id=mc_id, text=f'Игрок с именем {message.from_user.full_name} просит помощи.')
 
 
+@router.message(Command(commands=['rules']))
+async def rules_handler(message: Message):
+    """Информационное сообщение для игроков"""
+    await message.answer(text=COMMANDS_FOR_PLAYERS['rules'])
+
+
 #  Регистрируем пользователей
 
 
 @router.message(Command(commands=['start']))
-async def command_start_handler(message: Message, state: FSMContext):
+async def command_start_handler(message: Message, state: FSMContext, bot: Bot):
     """Предлагаем список команд"""
+    await set_players_menu(bot)  # ставим меню для игроков
+
     with ExecuteQuery(pool) as cursor:
         cursor.execute(f"SELECT user_id FROM player "
                        f"WHERE user_id = {message.from_user.id};")
@@ -46,13 +55,21 @@ async def command_start_handler(message: Message, state: FSMContext):
     if not user_exist:
         with ExecuteQuery(pool) as cursor:
             cursor.execute("SELECT team_id, name FROM team;")
-            teams = {str(id_): name for id_, name in cursor.fetchall()}
+            teams = {str(id_): f'"{name}"' for id_, name in cursor.fetchall()}
         await message.answer(text=COMMANDS_FOR_PLAYERS['start'],
-                             reply_markup=create_inline_kb(width=1, **teams))
+                             reply_markup=create_inline_kb(width=1, **teams, no_team='Моей команды нет в списке'))
         await state.set_state(FSMPlayersStates.new_player)
     else:
         await message.answer(text='Вы уже зарегистрировались в игре :(\n\n'
                                   'Если вам нужна помощь, обратитесь к персоналу')
+
+
+@router.callback_query(StateFilter(FSMPlayersStates.new_player), F.data == 'no_team')
+async def no_team_handler(callback: CallbackQuery, state: FSMContext, bot: Bot):
+    """Выходим из режима старта игры"""
+    await bot.delete_my_commands()
+    await callback.message.edit_text(text='Чтобы решить вашу проблему, обратитесь к персоналу квиза')
+    await state.set_state(default_state)
 
 
 @router.callback_query(StateFilter(FSMPlayersStates.new_player))
